@@ -1,0 +1,3 @@
+celery[redis]
+mediapipe
+opencv-python-headless

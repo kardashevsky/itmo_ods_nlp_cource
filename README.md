@@ -1,1 +1,1 @@
-# itmo_ods_nlp_cource
+docker-compose up -d --build

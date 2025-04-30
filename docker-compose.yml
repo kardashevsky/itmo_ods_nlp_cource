@@ -1,0 +1,205 @@
+version: '3'
+
+services:
+
+  rabbitmq:
+    image: rabbitmq:3.7-management
+    hostname: rabbitmq
+    volumes:
+      - ./_data/rabbitmq:/var/lib/rabbitmq
+    ports:
+      - 5672:5672
+      - 5671:5671
+      - 15672:15672
+      - 15671:15671
+
+  redis:
+    image: redis:latest
+    depends_on:
+      - rabbitmq
+
+  # Optionally, you can also include Flower for monitoring the Celery tasks
+  flower:
+    image: mher/flower
+    command: celery --broker=amqp://rabbitmq:5672 flower --port=5555
+    ports:
+      - "5555:5555"
+    depends_on:
+      - rabbitmq
+      - redis
+    environment:
+      - FLOWER_UNAUTHENTICATED_API=true
+
+  db:
+    image: postgres
+    build:
+      context: _data
+      dockerfile: Dockerfile
+    environment:
+      - POSTGRES_USER=username
+      - POSTGRES_PASSWORD=secret
+      - POSTGRES_DB=username
+    ports:
+      - "5432:5432"
+    volumes:
+      - ./_data/db_data:/var/lib/postgresql/data
+    depends_on:
+      - rabbitmq
+      - redis
+      - flower
+
+  service_compress:
+    build:
+      context: ./services/service_compress
+      dockerfile: Dockerfile
+    environment:
+      - CELERY_BROKER_URL=amqp://rabbitmq:5672
+      - CELERY_RESULT_BACKEND=redis://redis
+    volumes:
+      - ./services/service_compress:/worker
+      - shared_files:/temp/
+      - ./config/config.py:/worker/config.py
+    depends_on:
+      - rabbitmq
+      - redis
+      - flower
+      - db
+    command: celery -A worker worker --loglevel=info -Q service_video_compress_queue --concurrency=6
+
+  service_extract:
+    build:
+      context: ./services/service_extract
+      dockerfile: Dockerfile
+    environment:
+      - CELERY_BROKER_URL=amqp://rabbitmq:5672
+      - CELERY_RESULT_BACKEND=redis://redis
+    volumes:
+      - ./services/service_extract:/worker
+      - shared_files:/temp/
+      - ./config/config.py:/worker/config.py
+    depends_on:
+      - rabbitmq
+      - redis
+      - flower
+      - db
+    command: celery -A worker worker --loglevel=info -Q service_audio_extract_queue --concurrency=6
+
+  service_video_poses:
+    build:
+      context: ./services/service_poses
+      dockerfile: Dockerfile
+    environment:
+      - CELERY_BROKER_URL=amqp://rabbitmq:5672
+      - CELERY_RESULT_BACKEND=redis://redis
+    volumes:
+      - ./services/service_poses:/worker
+      - shared_files:/temp/
+      - ./config/config.py:/worker/config.py
+    depends_on:
+      - rabbitmq
+      - redis
+      - flower
+      - db
+    command: celery -A worker worker --loglevel=info -Q service_video_poses_queue --concurrency=8
+
+  service_audio_transcribe:
+    build:
+      context: ./services/service_transcribe
+      dockerfile: Dockerfile
+    environment:
+      - CELERY_BROKER_URL=amqp://rabbitmq:5672
+      - CELERY_RESULT_BACKEND=redis://redis
+    volumes:
+      - ./services/service_transcribe:/worker
+      - shared_files:/temp/
+      - ./config/config.py:/worker/config.py
+    depends_on:
+      - rabbitmq
+      - redis
+      - flower
+      - db
+    command: celery -A worker worker --loglevel=info -Q service_audio_transcribe_queue --concurrency=8
+
+
+  service_audio_emotions:
+    build:
+      context: ./services/service_emotions
+      dockerfile: Dockerfile
+    environment:
+      - CELERY_BROKER_URL=amqp://rabbitmq:5672
+      - CELERY_RESULT_BACKEND=redis://redis
+    volumes:
+      - ./services/service_emotions:/worker
+      - shared_files:/temp/
+      - ./config/config.py:/worker/config.py
+    depends_on:
+      - rabbitmq
+      - redis
+      - flower
+      - db
+    command: celery -A worker worker --loglevel=info -Q service_audio_emotions_queue --concurrency=8
+
+  service_report:
+    build:
+      context: ./services/service_report
+      dockerfile: Dockerfile
+    environment:
+      - CELERY_BROKER_URL=amqp://rabbitmq:5672
+      - CELERY_RESULT_BACKEND=redis://redis
+      - OPENAI_API_KEY=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
+    volumes:
+      - ./services/service_report:/worker
+      - shared_files:/temp/
+      - ./config/config.py:/worker/config.py
+    depends_on:
+      - rabbitmq
+      - redis
+      - flower
+      - db
+    command: celery -A worker worker --loglevel=info -Q service_common_report_queue --concurrency=8
+
+  api:
+    build:
+      context: api
+      dockerfile: Dockerfile
+    ports:
+      - "8081:8081"
+    volumes:
+      - ./api/:/api/
+      - ./config/config.py:/api/config.py
+      - shared_files:/temp/
+    environment: # TODO
+      - PYTHONPATH=/api
+      - CELERY_BROKER_URL=amqp://rabbitmq:5672
+      - CELERY_RESULT_BACKEND=redis://redis
+      - DB_HOST=db
+      - DB_PORT=5432
+      - DB_NAME=username
+      - DB_USER=username
+      - DB_PASS=secret
+      - BOT_TOKEN=5768337691:AAH5YkoiEuPk8-FZa32hStHTqXiLPtAEhx8
+    depends_on:
+      - rabbitmq
+      - redis
+      - flower
+      - db
+      - service_extract
+      - service_compress
+      - service_video_poses
+      - service_audio_transcribe
+      - service_audio_emotions
+      - service_report
+    command: python -m uvicorn main:app --host 0.0.0.0 --port 8081
+
+volumes:
+  db_data:
+  shared_files:
+    driver: local # Define the driver and options under the volume name
+    driver_opts:
+      type: none
+      device: ./_temp/
+      o: bind
+
+networks:
+  default:
+    driver: bridge

@@ -1,0 +1,18 @@
+# Byte-compiled / optimized / DLL files
+__pycache__/
+*.py[cod]
+*$py.class
+
+# macOS metadata
+.DS_Store
+
+# Ignore everything inside _temp, but keep the directory (so colleagues see it should exist)
+_temp/*
+!_temp/
+
+# Ignore the db_data folder under _data
+_data/db_data/
+_data/rabbitmq/
+
+# Ignore the entire docker folder
+docker/
