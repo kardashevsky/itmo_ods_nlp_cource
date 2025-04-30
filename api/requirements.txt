@@ -1,0 +1,10 @@
+fastapi
+uvicorn
+celery[redis]
+flower
+init-data-py
+aiofiles
+pyyaml
+psycopg2-binary
+sqlalchemy
+python-multipart
